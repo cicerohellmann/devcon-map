@@ -413,7 +413,8 @@ svg .room.flash .shape { animation: flash 1.4s ease-out 2 }
   }
 
   // state.a / state.b: the selected block [start, end) in minutes; every view shows only what overlaps it
-  const state = { day: DAYS[0][0], a: 540, b: 600, view: store.get('view', 'map'), q: '', track: '', stars: false };
+  const F = store.get('filters', {});
+  const state = { day: DAYS[0][0], a: 540, b: 600, view: store.get('view', 'map'), q: F.q || '', track: F.track || '', stars: !!F.stars };
   const stars = new Set(store.get('stars', []));
   const byDay = d => D.sessions.filter(s => s.day === d);
   const talksOf = d => byDay(d).filter(s => s.room !== 'Schedule');
@@ -462,6 +463,13 @@ svg .room.flash .shape { animation: flash 1.4s ease-out 2 }
   $('planbox').innerHTML = planSVG();
   const tracks = [...new Set(D.sessions.map(s => s.track).filter(Boolean))].sort();
   $('track').innerHTML += tracks.map(t => `<option>${esc(t)}</option>`).join('');
+  if (!tracks.includes(state.track)) state.track = '';
+  // filters persist across visits; ★ My picks is exclusive with search and track
+  function setFilters() {
+    $('q').value = state.q; $('track').value = state.track; $('only-stars').setAttribute('aria-pressed', state.stars);
+    store.set('filters', { q: state.q, track: state.track, stars: state.stars });
+  }
+  setFilters();
 
   // ---------- rendering ----------
   function renderBar() {
@@ -598,8 +606,7 @@ svg .room.flash .shape { animation: flash 1.4s ease-out 2 }
     const s = D.sessions.find(x => x.id === id);
     closePop();
     if (!isLive(s)) { state.day = s.day; setBlk(blkAt(s.day, s.a)) }
-    state.view = 'talks'; state.q = ''; state.track = ''; state.stars = false;
-    $('q').value = ''; $('track').value = ''; $('only-stars').setAttribute('aria-pressed', false);
+    state.view = 'talks'; state.q = ''; state.track = ''; state.stars = false; setFilters();
     render();
     const d = document.querySelector(`#list [data-id="${id}"]`); if (!d) return;
     d.open = true; d.classList.remove('ping'); void d.offsetWidth; d.classList.add('ping');
@@ -743,9 +750,9 @@ svg .room.flash .shape { animation: flash 1.4s ease-out 2 }
     if (!(d instanceof HTMLDetailsElement) || !d.classList.contains('ses') || !d.open) return;
     document.querySelectorAll('details.ses[open]').forEach(o => { if (o !== d) o.open = false });
   }, true);
-  $('q').addEventListener('input', e => { state.q = e.target.value; renderTalks() });
-  $('track').addEventListener('change', e => { state.track = e.target.value; renderTalks() });
-  $('only-stars').onclick = e => { state.stars = !state.stars; e.currentTarget.setAttribute('aria-pressed', state.stars); renderTalks() };
+  $('q').addEventListener('input', e => { state.q = e.target.value; if (state.q) state.stars = false; setFilters(); renderTalks() });
+  $('track').addEventListener('change', e => { state.track = e.target.value; if (state.track) state.stars = false; setFilters(); renderTalks() });
+  $('only-stars').onclick = () => { state.stars = !state.stars; if (state.stars) state.q = state.track = ''; setFilters(); renderTalks() };
   $('scrim').onclick = closeSheet;
   document.addEventListener('keydown', e => { if (e.key !== 'Escape') return; if (!$('sheet').hidden) closeSheet(); else if (popRoom) { const g = roomEl(popRoom); closePop(); if (g) g.focus() } });
   addEventListener('resize', () => { if (popRoom) openPop(popRoom) });
