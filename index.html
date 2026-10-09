@@ -151,8 +151,22 @@ svg .room.flash .shape { animation: flash 1.4s ease-out 2 }
 
 /* talks view */
 .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px }
-.filters input[type=search] { flex: 1 1 220px; min-width: 0; border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 8px 14px }
-.filters select { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 8px 12px; max-width: 100% }
+.filters input[type=search] { flex: 1 1 100%; min-width: 0; border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 8px 14px }
+.fbtn { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 8px 12px; max-width: 100% }
+.fbtn::after { content: ' ▾'; color: var(--muted) }
+.fbtn[aria-expanded="true"]::after { content: ' ▴' }
+.fbtn.on { border-color: var(--accent); background: var(--accent-soft) }
+.track-pan, .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px }
+.track-pan[hidden], .chips[hidden] { display: none }
+.track-pan { padding: 8px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface) }
+.tchip, .chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 5px 10px; font-size: 13px; font-weight: 700 }
+.tchip::before, .chip.trk::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--tc) }
+.tchip[aria-pressed="true"] { border-color: var(--tc); background: color-mix(in srgb, var(--tc) 18%, var(--surface)) }
+.chip { padding-right: 4px }
+.chip.trk { border-color: var(--tc) }
+.chip i { font-style: normal }
+.chip b { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; color: var(--muted); font-size: 15px; line-height: 1 }
+.chip:hover b, .chip:focus-visible b { background: var(--surface-2); color: var(--fg) }
 #only-stars[aria-pressed="true"] { background: var(--gold-soft); border-color: var(--gold) }
 .count { color: var(--muted); font-size: 13px; margin-top: 10px }
 .slot-h { font-family: var(--f-mono); font-weight: 700; font-size: 13px; color: var(--muted); margin: 18px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--line) }
@@ -274,15 +288,17 @@ svg .room.flash .shape { animation: flash 1.4s ease-out 2 }
   </section>
   <section id="talks-view" class="talks-col" hidden>
     <div class="filters">
-      <input type="search" id="q" placeholder="Search titles, descriptions, speakers" aria-label="Search talks">
-      <select id="track" aria-label="Track"><option value="">All tracks</option></select>
+      <input type="search" id="q" placeholder="Search, Enter to add as a filter" aria-label="Search talks" enterkeyhint="done">
+      <button class="fbtn" id="track-btn" type="button" aria-expanded="false" aria-controls="track-pan">All tracks</button>
       <button class="btn" id="only-stars" type="button" aria-pressed="false">★ My picks</button>
     </div>
+    <div class="track-pan" id="track-pan" role="group" aria-label="Tracks" hidden></div>
+    <div class="chips" id="chips" hidden></div>
     <div class="pane" id="talks-pane">
       <div class="count" id="count"></div>
       <div id="list"></div>
       <button class="more" id="more" type="button"><b id="more-t"></b><small id="more-s"></small><span class="more-bar"><span id="more-fill"></span></span></button>
-      <p class="foot">Data: the same Sessionize schedule the official app loads, checked against the app on 8 Oct 2026, so later room or time changes are not included. The plan is traced from the official floor plan in the app; shapes are approximate. Community Meetups run at the Activity &amp; Networking Area on Level 2, as each session's description in the app states; the Robot Rally Finals are at the Robot Rally booth, which the plan does not mark. Picks are saved in this browser only. The day is cut into blocks wherever any session starts or ends; everything shown is what runs inside the selected block. At the end of the list, keep scrolling until the bar fills to move to the next block.</p>
+      <p class="foot">Data: the same Sessionize schedule the official app loads, checked against the app on 8 Oct 2026, so later room or time changes are not included. The plan is traced from the official floor plan in the app; shapes are approximate. Community Meetups run at the Activity &amp; Networking Area on Level 2, as each session's description in the app states; the Robot Rally Finals are at the Robot Rally booth, which the plan does not mark. Picks are saved in this browser only. The day is cut into blocks at the breaks; everything shown is what runs inside the selected block, and talks that began in an earlier block are listed last as still running. At the end of the list, keep scrolling until the bar fills to move to the next block.</p>
     </div>
   </section>
 </main>
@@ -414,7 +430,7 @@ svg .room.flash .shape { animation: flash 1.4s ease-out 2 }
 
   // state.a / state.b: the selected block [start, end) in minutes; every view shows only what overlaps it
   const F = store.get('filters', {});
-  const state = { day: DAYS[0][0], a: 540, b: 600, view: store.get('view', 'map'), q: F.q || '', track: F.track || '', stars: !!F.stars };
+  const state = { day: DAYS[0][0], a: 540, b: 600, view: store.get('view', 'map'), q: F.q || '', terms: F.terms || [], tracks: F.tracks || (F.track ? [F.track] : []), stars: !!F.stars };
   const stars = new Set(store.get('stars', []));
   const byDay = d => D.sessions.filter(s => s.day === d);
   const talksOf = d => byDay(d).filter(s => s.room !== 'Schedule');
@@ -424,11 +440,12 @@ svg .room.flash .shape { animation: flash 1.4s ease-out 2 }
   const dayName = () => DAYS.find(d => d[0] === state.day)[1];
   const rng = (a, b) => hm(a) + '–' + hm(b);
 
-  // event blocks: cut the day at every start and end time of any session (breaks and plenaries included)
+  // event blocks: cut the day only at breaks (registration, breaks, lunch, reception), so talks between two breaks form one block
   const BLK = {};
   function blocks(d) {
     if (BLK[d]) return BLK[d];
-    const l = byDay(d), cuts = [...new Set(l.flatMap(s => [s.a, s.b]))].sort((x, y) => x - y), out = [];
+    const l = byDay(d), br = l.filter(s => s.room === 'Schedule'), out = [];
+    const cuts = [...new Set([Math.min(...l.map(s => s.a)), Math.max(...l.map(s => s.b)), ...br.flatMap(s => [s.a, s.b])])].sort((x, y) => x - y);
     for (let i = 0; i < cuts.length - 1; i++) {
       const a = cuts[i], b = cuts[i + 1], on = l.filter(s => inR(s, a, b));
       if (!on.length) continue;
@@ -443,7 +460,7 @@ svg .room.flash .shape { animation: flash 1.4s ease-out 2 }
   const nextBlk = () => blocks(state.day).find(k => k.a >= state.b);
   const prevBlk = () => blocks(state.day).filter(k => k.b <= state.a).pop();
   const firstTalk = d => Math.min(...talksOf(d).filter(s => !s.svc).map(s => s.a));
-  const hasPick = k => k.talks.some(s => stars.has(s.id) && s.a === k.a);
+  const hasPick = k => k.talks.some(s => stars.has(s.id) && s.a >= k.a && s.a < k.b);
 
   function berlinNow() {
     const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
@@ -462,23 +479,35 @@ svg .room.flash .shape { animation: flash 1.4s ease-out 2 }
   $('days').innerHTML = DAYS.map(([d, l]) => `<button type="button" data-day="${d}">${l.replace(/ (\w+)$/, '<span class="mo"> $1</span>')}</button>`).join('');
   $('planbox').innerHTML = planSVG();
   const tracks = [...new Set(D.sessions.map(s => s.track).filter(Boolean))].sort();
-  $('track').innerHTML += tracks.map(t => `<option>${esc(t)}</option>`).join('');
-  if (!tracks.includes(state.track)) state.track = '';
-  // filters persist across visits; ★ My picks is exclusive with search and track
+  const trackC = t => `var(--t-${/^droid/.test(t) ? 'droid' : /^flutter/.test(t) ? 'flutter' : /^swift/.test(t) ? 'swift' : /^react/.test(t) ? 'rn' : /^agentic/.test(t) ? 'agentic' : /^mas/.test(t) ? 'mas' : /^xr/.test(t) ? 'xr' : 'other'})`;
+  $('track-pan').innerHTML = tracks.map(t => `<button class="tchip" type="button" data-track="${esc(t)}" aria-pressed="false" style="--tc:${trackC(t)}">${esc(t)}</button>`).join('');
+  state.tracks = state.tracks.filter(t => tracks.includes(t));
+  // filters persist across visits: search words kept with Enter and tracks each match any of their kind, the two kinds combine;
+  // ★ My picks is exclusive with all of them
   function setFilters() {
-    $('q').value = state.q; $('track').value = state.track; $('only-stars').setAttribute('aria-pressed', state.stars);
-    store.set('filters', { q: state.q, track: state.track, stars: state.stars });
+    const n = state.tracks.length;
+    $('q').value = state.q; $('only-stars').setAttribute('aria-pressed', state.stars);
+    $('track-btn').textContent = n === 1 ? state.tracks[0] : n ? n + ' tracks' : 'All tracks';
+    $('track-btn').classList.toggle('on', n > 0);
+    document.querySelectorAll('#track-pan [data-track]').forEach(b => b.setAttribute('aria-pressed', state.tracks.includes(b.dataset.track)));
+    $('chips').innerHTML = state.terms.map((w, i) => `<button class="chip" type="button" data-term="${i}" aria-label="Remove search ${esc(w)}"><i>“${esc(w)}”</i><b aria-hidden="true">×</b></button>`).join('') +
+      state.tracks.map(t => `<button class="chip trk" type="button" data-untrack="${esc(t)}" style="--tc:${trackC(t)}" aria-label="Remove track ${esc(t)}"><i>${esc(t)}</i><b aria-hidden="true">×</b></button>`).join('');
+    $('chips').hidden = !state.terms.length && !state.tracks.length;
+    store.set('filters', { q: state.q, terms: state.terms, tracks: state.tracks, stars: state.stars });
   }
+  const trackPan = open => { $('track-pan').hidden = !open; $('track-btn').setAttribute('aria-expanded', open) };
   setFilters();
 
   // ---------- rendering ----------
+  // a break block is named by its break alone; a talk block by how many talks run in it
+  const blkLab = k => k.plen.length ? k.plen.map(s => s.title.split(' - ')[0]).join(' / ') : `${k.talks.length} talk${k.talks.length === 1 ? '' : 's'}`;
   function renderBar() {
     document.querySelectorAll('#days button').forEach(b => { b.setAttribute('aria-pressed', b.dataset.day === state.day); b.classList.toggle('has-pick', talksOf(b.dataset.day).some(s => stars.has(s.id))) });
     $('v-map').setAttribute('aria-pressed', state.view === 'map'); $('v-talks').setAttribute('aria-pressed', state.view === 'talks');
     const K = cur();
     const strip = $('blocks');
     strip.innerHTML = blocks(state.day).map(k => {
-      const lab = [k.plen.map(s => s.title).join(' / '), k.talks.length ? `${k.talks.length} talk${k.talks.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ');
+      const lab = blkLab(k);
       const pk = hasPick(k), on = k === K;
       return `<button type="button" class="blk${k.plen.length ? ' svc' : ''}${pk ? ' has-pick' : ''}${k.b <= state.a ? ' past' : ''}" data-a="${k.a}" aria-pressed="${on}" title="${esc(rng(k.a, k.b) + ' · ' + lab)}" style="width:${Math.max(100, (k.b - k.a) * 3.2)}px">` +
         `<span class="gm"></span><span class="bt">${rng(k.a, k.b)}</span><span class="bl">${esc(lab)}</span></button>`;
@@ -491,8 +520,7 @@ svg .room.flash .shape { animation: flash 1.4s ease-out 2 }
     $('dayline').setAttribute('aria-valuetext', rng(state.a, state.b));
     renderNow();
     const nx = nextBlk();
-    const nlab = k => [k.plen.map(s => s.title).join(' / '), k.talks.length ? `${k.talks.length} talks` : ''].filter(Boolean).join(' · ');
-    $('more-t').textContent = nx ? `Next block: ${rng(nx.a, nx.b)} · ${nlab(nx)}` : 'That is the last block of the day';
+    $('more-t').textContent = nx ? `Next block: ${rng(nx.a, nx.b)} · ${blkLab(nx)}` : 'That is the last block of the day';
     $('more-s').textContent = nx ? 'Keep scrolling down until the bar fills, or tap here' : '';
     $('more').disabled = !nx;
   }
@@ -519,7 +547,7 @@ svg .room.flash .shape { animation: flash 1.4s ease-out 2 }
     const lvl = LEVEL_NAME[LEVEL_OF[s.room]] || (s.lv === 'ALL' ? '' : s.lv);
     return `<details class="ses${pk ? ' picked' : ''}" style="--tc:${tc(s.room)}" data-id="${s.id}" data-room="${esc(s.room)}"${opts.open ? ' open' : ''}>
       <summary>
-        <div class="ses-meta">${live ? '<span class="np">IN BLOCK</span>' : ''}<span>${s.t0}–${s.t1}</span>${opts.room !== false ? `<span class="room">${esc(SHORT[s.room] || s.room)}</span><span>${esc(lvl)}</span>` : ''}</div>
+        <div class="ses-meta">${live && opts.np !== false ? '<span class="np">IN BLOCK</span>' : ''}<span>${s.t0}–${s.t1}</span>${opts.room !== false ? `<span class="room">${esc(SHORT[s.room] || s.room)}</span><span>${esc(lvl)}</span>` : ''}</div>
         <div class="ses-title"><span>${esc(s.title)}</span>${s.svc ? '' : `<button type="button" class="star" data-star="${s.id}" aria-pressed="${pk}">${pk ? '★ Going' : '☆ Pick'}</button>`}</div>
         ${s.spk.length ? `<div class="ses-spk">${esc(names(s))}</div>` : ''}
       </summary>
@@ -533,15 +561,17 @@ svg .room.flash .shape { animation: flash 1.4s ease-out 2 }
   }
 
   function renderTalks() {
-    const q = state.q.trim().toLowerCase();
+    const words = [...state.terms, state.q].map(w => w.trim().toLowerCase()).filter(Boolean);
     let l = talksOf(state.day).filter(s => !s.svc && isLive(s));
-    if (state.track) l = l.filter(s => s.track === state.track || (s.also || []).includes(state.track));
+    if (state.tracks.length) l = l.filter(s => state.tracks.some(t => s.track === t || (s.also || []).includes(t)));
     if (state.stars) l = l.filter(s => stars.has(s.id));
-    if (q) l = l.filter(s => (s.title + ' ' + s.desc + ' ' + names(s) + ' ' + s.room + ' ' + s.spk.map(i => SP[i] ? SP[i].tag : '').join(' ')).toLowerCase().includes(q));
+    if (words.length) l = l.filter(s => { const h = (s.title + ' ' + s.desc + ' ' + names(s) + ' ' + s.room + ' ' + s.spk.map(i => SP[i] ? SP[i].tag : '').join(' ')).toLowerCase(); return words.some(w => h.includes(w)) });
     l.sort((a, b) => a.a - b.a || a.room.localeCompare(b.room));
     $('count').textContent = `${l.length} talk${l.length === 1 ? '' : 's'} in ${rng(state.a, state.b)} · ${dayName()}`;
     let out = '', last = '';
-    l.forEach(s => { if (s.t0 !== last) { out += `<div class="slot-h">${s.t0}</div>`; last = s.t0 } out += sesHTML(s, { jump: true }) });
+    l.filter(s => s.a >= state.a).forEach(s => { if (s.t0 !== last) { out += `<div class="slot-h">${s.t0}</div>`; last = s.t0 } out += sesHTML(s, { jump: true, np: false }) });
+    const still = l.filter(s => s.a < state.a);
+    if (still.length) out += `<div class="slot-h">Still running</div>` + still.map(s => sesHTML(s, { jump: true, np: false })).join('');
     $('list').innerHTML = out || `<p class="count">${talksOf(state.day).some(s => !s.svc && isLive(s)) ? 'Nothing in this block matches. Clear the search or pick another track.' : `Nothing on stage in ${rng(state.a, state.b)}. Pick a later block above, or scroll on to the next one.`}</p>`;
   }
 
@@ -606,7 +636,7 @@ svg .room.flash .shape { animation: flash 1.4s ease-out 2 }
     const s = D.sessions.find(x => x.id === id);
     closePop();
     if (!isLive(s)) { state.day = s.day; setBlk(blkAt(s.day, s.a)) }
-    state.view = 'talks'; state.q = ''; state.track = ''; state.stars = false; setFilters();
+    state.view = 'talks'; state.q = ''; state.terms = []; state.tracks = []; state.stars = false; setFilters(); trackPan(false);
     render();
     const d = document.querySelector(`#list [data-id="${id}"]`); if (!d) return;
     d.open = true; d.classList.remove('ping'); void d.offsetWidth; d.classList.add('ping');
@@ -751,12 +781,33 @@ svg .room.flash .shape { animation: flash 1.4s ease-out 2 }
     document.querySelectorAll('details.ses[open]').forEach(o => { if (o !== d) o.open = false });
   }, true);
   $('q').addEventListener('input', e => { state.q = e.target.value; if (state.q) state.stars = false; setFilters(); renderTalks() });
-  $('track').addEventListener('change', e => { state.track = e.target.value; if (state.track) state.stars = false; setFilters(); renderTalks() });
-  $('only-stars').onclick = () => { state.stars = !state.stars; if (state.stars) state.q = state.track = ''; setFilters(); renderTalks() };
+  $('q').addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const w = state.q.trim();
+    if (w && !state.terms.some(x => x.toLowerCase() === w.toLowerCase())) state.terms.push(w);
+    state.q = ''; setFilters(); renderTalks();
+  });
+  $('track-btn').onclick = () => trackPan($('track-pan').hidden);
+  $('track-pan').onclick = e => {
+    const b = e.target.closest('[data-track]'); if (!b) return;
+    const t = b.dataset.track;
+    state.tracks = state.tracks.includes(t) ? state.tracks.filter(x => x !== t) : [...state.tracks, t];
+    if (state.tracks.length) state.stars = false;
+    setFilters(); renderTalks();
+  };
+  $('chips').onclick = e => {
+    const b = e.target.closest('.chip'); if (!b) return;
+    if (b.dataset.term != null) state.terms.splice(+b.dataset.term, 1);
+    else state.tracks = state.tracks.filter(x => x !== b.dataset.untrack);
+    setFilters(); renderTalks();
+  };
+  $('only-stars').onclick = () => { state.stars = !state.stars; if (state.stars) { state.q = ''; state.terms = []; state.tracks = []; trackPan(false) } setFilters(); renderTalks() };
   $('scrim').onclick = closeSheet;
-  document.addEventListener('keydown', e => { if (e.key !== 'Escape') return; if (!$('sheet').hidden) closeSheet(); else if (popRoom) { const g = roomEl(popRoom); closePop(); if (g) g.focus() } });
+  document.addEventListener('keydown', e => { if (e.key !== 'Escape') return; if (!$('track-pan').hidden) { trackPan(false); $('track-btn').focus() } else if (!$('sheet').hidden) closeSheet(); else if (popRoom) { const g = roomEl(popRoom); closePop(); if (g) g.focus() } });
   addEventListener('resize', () => { if (popRoom) openPop(popRoom) });
   document.addEventListener('click', e => {
+    if (!$('track-pan').hidden && !e.target.closest('#track-pan, #track-btn')) trackPan(false);
     if (e.target.id === 'close') { closeSheet(); return }
     if (e.target.closest('#pop-x')) { closePop(); return }
     const op = e.target.closest('[data-open]'); if (op) { openInTalks(op.dataset.open); return }
